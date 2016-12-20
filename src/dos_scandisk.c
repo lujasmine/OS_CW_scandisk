@@ -25,6 +25,32 @@ struct {
 	int bytes_per_cluster;
 } cluster_info;
 
+void free_clusters(uint16_t start_cluster, uint8_t *image_buf, struct bpb33* bpb, int cluster_tag[]) {
+	int i;
+	for(i = start_cluster; i < cluster_info.number_of_clusters; i++) {
+		cluster_tag[i] = 0;
+		if(is_end_of_file(get_fat_entry(i, image_buf, bpb)) == 1) {
+			break;
+		}
+		set_fat_entry(i, FAT12_MASK&CLUST_FREE, image_buf, bpb);
+	}
+	set_fat_entry(i, FAT12_MASK&CLUST_FREE, image_buf, bpb);
+}
+
+int calculate_number_of_extra_clusters(int cluster_tag[], uint16_t start_cluster, uint8_t *image_buf, struct bpb33* bpb) {
+	int i;
+	int count = 0;
+	for(i = start_cluster; i < cluster_info.number_of_clusters; i++) {
+		cluster_tag[i] = 0;
+		count++;
+		// printf("counting clusters: %i\n", count);
+		if(is_end_of_file(get_fat_entry(i, image_buf, bpb)) == 1) {
+			break;
+		}
+	}
+	return count;
+}
+
 void get_file_extension(struct direntry *dirent, char *extension) {
 	extension[3] = ' ';
 	memcpy(extension, dirent->deExtension, 3);
@@ -68,7 +94,12 @@ void find_length_inconsistencies(int cluster_tag[], uint8_t *image_buf, struct b
 	for(i = start_cluster; i <= end_cluster; i++) {
 		// printf("checking cluster: %i wit ref value: %i\n", i, cluster_tag[i]);
 		if(cluster_tag[i] == -3) {
-			printf("%s %i\n", filename, file_size);
+			set_fat_entry(i, FAT12_MASK&CLUST_EOFS, image_buf, bpb);
+			int extra_clusters = calculate_number_of_extra_clusters(cluster_tag, i+1, image_buf, bpb);
+			// printf("extra: %i\n", extra_clusters);
+			free_clusters(i+1, image_buf, bpb, cluster_tag);
+			int fat_file_size = ((end_cluster - start_cluster + 1) + extra_clusters) * cluster_info.bytes_per_cluster;
+			printf("%s %i %i\n", filename, file_size, fat_file_size);
 		}
 	}
 
@@ -171,7 +202,7 @@ void find_lost_files(int cluster_tag[], uint16_t cluster, uint8_t *image_buf, st
 	int lost_file_start_cluster = -1;
 	int total_lost_files = 0;
 	int i;
-	for(i = cluster; i <= cluster_info.number_of_clusters; i++) {
+	for(i = cluster; i < cluster_info.number_of_clusters; i++) {
 		int next_cluster = get_fat_entry(i, image_buf, bpb);
 		if (cluster_tag[i] == -2) {
 			count++;
@@ -318,6 +349,8 @@ int main(int argc, char** argv) {
 		usage();
 	}
 
+
+
 	image_buf = mmap_file(argv[1], &fd);
     bpb = check_bootsector(image_buf);
 
@@ -334,13 +367,12 @@ int main(int argc, char** argv) {
     find_unreferenced_clusters(cluster_tag, image_buf, bpb);
     find_lost_files(cluster_tag, 2, image_buf, bpb);
 
-    follow_dir(cluster_tag, 0, image_buf, bpb, 1);
-
     // int i;
     // for(i = 0; i < cluster_info.number_of_clusters; i++) {
     // 	printf("cluster %i: %i referenced: %i\n", i, get_fat_entry(i, image_buf, bpb) ,cluster_tag[i]);
     // }
 
+    follow_dir(cluster_tag, 0, image_buf, bpb, 1);
     free(bpb);
 
     close(fd);

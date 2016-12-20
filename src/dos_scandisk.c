@@ -44,6 +44,11 @@ void write_dirent(struct direntry *dirent, char *filename, uint16_t start_cluste
 	}
     }
 
+	/* convert filename to upper case */ // LEFT COMMENTED OUT - SPEC SAYS NAME FILES IN LOWERCASE
+ //    for (i = 0; i < strlen(uppername); i++) {
+	// uppername[i] = toupper(uppername[i]);
+ //    }
+
     /* set the file name and extension */
     memset(dirent->deName, ' ', 8);
     p = strchr(uppername, '.');
@@ -108,8 +113,6 @@ void recover_lost_file(int lost_file_number, uint16_t start_cluster, int cluster
 
     uint32_t file_size = cluster_count * cluster_info.bytes_per_cluster;
 
-    printf("recovering file number: %i starting cluster: %i number of clusters: %i filesize: %i\n", lost_file_number, start_cluster, cluster_count, file_size);
-
 	create_dirent(dirent, filename, start_cluster, file_size, image_buf, bpb);
     
 }
@@ -146,7 +149,7 @@ void find_unreferenced_clusters(int cluster_tag[], uint8_t *image_buf, struct bp
 	int found_unreferenced_cluster = 0; //tracks whether any unreferenced cluster is found or not
 	for(i = 2; i < cluster_info.number_of_clusters; i++) {
 		int next_cluster = get_fat_entry(i, image_buf, bpb);
-		if ((next_cluster != 0) && (cluster_tag[i] != -1)) { //if cluster is neither free in the FAT nor used in any file
+		if ((next_cluster != 0) && (cluster_tag[i] == 0)) { //if cluster is neither free in the FAT nor used in any file
 			if (found_unreferenced_cluster == 0) { //unreferenced clusters are present
 				printf("Unreferenced: ");
 				found_unreferenced_cluster = 1; //update tracker
@@ -162,7 +165,11 @@ void find_unreferenced_clusters(int cluster_tag[], uint8_t *image_buf, struct bp
 //mark cluster as referenced
 void mark_referenced_cluster(int cluster_tag[], uint16_t cluster, uint16_t end_cluster, uint8_t *image_buf, struct bpb33* bpb) {
 
-	cluster_tag[cluster] = -1; //mark referenced clusters with -1 'tag'
+	if (cluster == end_cluster) {
+		cluster_tag[cluster] = -3;
+	} else {
+		cluster_tag[cluster] = -1; //mark referenced clusters with -1 'tag'
+	}
 
 	// printf("cluster %i: %i referenced: %i\n", cluster, get_fat_entry(cluster, image_buf, bpb) ,cluster_tag[cluster]);
 
@@ -280,6 +287,8 @@ int main(int argc, char** argv) {
     follow_dir(cluster_tag, 0, image_buf, bpb);
     find_unreferenced_clusters(cluster_tag, image_buf, bpb);
     find_lost_files(cluster_tag, 2, image_buf, bpb);
+
+    find_length_inconsistencies(cluster_tag, image_buf, bpb);
 
     // int i;
     // for(i = 0; i < cluster_info.number_of_clusters; i++) {

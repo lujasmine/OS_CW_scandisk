@@ -25,6 +25,48 @@ struct {
 	int bytes_per_cluster;
 } cluster_info;
 
+void get_file_extension(struct direntry *dirent, char *extension) {
+	extension[3] = ' ';
+	memcpy(extension, dirent->deExtension, 3);
+
+	int i;
+	/* remove the spaces from extensions */
+    for (i = 3; i > 0; i--) {
+	if (extension[i] == ' ') 
+	    extension[i] = '\0';
+	else 
+	    break;
+    }
+}
+
+void get_file_name(struct direntry *dirent, char *name) {
+    name[8] = ' ';
+    memcpy(name, &(dirent->deName[0]), 8);
+
+    /* skip over deleted entries */
+    if (((uint8_t)name[0]) == SLOT_DELETED) {
+    	return;
+    }
+    
+    int i;
+	/* remove the spaces from extensions */
+    for (i = 8; i > 0; i--) {
+	if (name[i] == ' ') 
+	    name[i] = '\0';
+	else 
+	    break;
+    }
+}
+
+// void find_length_inconsistencies(int cluster_tag[], uint8_t *image_buf, struct bpb33* bpb, char *filename) {
+// 	int i;
+// 	for(i = 0; i < cluster_info.number_of_clusters; i++) {
+// 		if(cluster_tag[i] == -3) {
+// 			printf("%s\n", filename);
+// 		}
+// 	}	
+// }
+
 /* write the values into a directory entry */
 void write_dirent(struct direntry *dirent, char *filename, uint16_t start_cluster, uint32_t size)
 {
@@ -130,7 +172,7 @@ void find_lost_files(int cluster_tag[], uint16_t cluster, uint8_t *image_buf, st
 			if (lost_file_start_cluster == -1) {
 				lost_file_start_cluster = i;
 			}
-			if (is_end_of_file(next_cluster)) {
+			if (is_end_of_file(next_cluster) == 1) {
 				total_lost_files++;
 				printf("Lost File: %i %i\n", lost_file_start_cluster, count);
 				// printf("next call starting on cluster %i\n", cluster+1);
@@ -150,7 +192,7 @@ void find_unreferenced_clusters(int cluster_tag[], uint8_t *image_buf, struct bp
 	for(i = 2; i < cluster_info.number_of_clusters; i++) {
 		int next_cluster = get_fat_entry(i, image_buf, bpb);
 		if ((next_cluster != 0) && (cluster_tag[i] == 0)) { //if cluster is neither free in the FAT nor used in any file
-			if (found_unreferenced_cluster == 0) { //unreferenced clusters are present
+			if (found_unreferenced_cluster == 0) { //there exists unreferenced clusters in the disk image
 				printf("Unreferenced: ");
 				found_unreferenced_cluster = 1; //update tracker
 			}
@@ -165,16 +207,16 @@ void find_unreferenced_clusters(int cluster_tag[], uint8_t *image_buf, struct bp
 //mark cluster as referenced
 void mark_referenced_cluster(int cluster_tag[], uint16_t cluster, uint16_t end_cluster, uint8_t *image_buf, struct bpb33* bpb) {
 
-	if (cluster == end_cluster) {
+	// printf("cluster %i: %i referenced: %i end cluster:%i\n", cluster, get_fat_entry(cluster, image_buf, bpb) ,cluster_tag[cluster], end_cluster);
+	if ((cluster == end_cluster) && (is_end_of_file(get_fat_entry(cluster, image_buf, bpb)) == 0)) {
+		// printf("NOT END OF FILE: %i", is_end_of_file(cluster));
 		cluster_tag[cluster] = -3;
 	} else {
 		cluster_tag[cluster] = -1; //mark referenced clusters with -1 'tag'
 	}
 
-	// printf("cluster %i: %i referenced: %i\n", cluster, get_fat_entry(cluster, image_buf, bpb) ,cluster_tag[cluster]);
-
 	uint16_t next_cluster = get_fat_entry(cluster, image_buf, bpb);
-	if (is_end_of_file(next_cluster)) {
+	if (is_end_of_file(next_cluster) == 1) {
 		return;
 	} else {
 		mark_referenced_cluster(cluster_tag, next_cluster, end_cluster, image_buf, bpb);
@@ -182,43 +224,31 @@ void mark_referenced_cluster(int cluster_tag[], uint16_t cluster, uint16_t end_c
 }
 
 //walks through directory tree
-void follow_dir(int cluster_tag[], uint16_t cluster, uint8_t *image_buf, struct bpb33* bpb) {
+void follow_dir(int cluster_tag[], uint16_t cluster, uint8_t *image_buf, struct bpb33* bpb, int find_inconsistencies) {
     struct direntry *dirent;
-    int d, i;
+    int d;
     dirent = (struct direntry*)cluster_to_addr(cluster, image_buf, bpb);
     while (1) {
 		for (d = 0; d < cluster_info.number_of_clusters; d += sizeof(struct direntry)) {
+			// printf("%i\n", cluster);
+		    uint16_t file_cluster;
+		    // char name[9];
+		    // char extension[4];
 
 		    char name[9];
-		    char extension[4];
-		    uint16_t file_cluster;
-		    name[8] = ' ';
-		    extension[3] = ' ';
-		    memcpy(name, &(dirent->deName[0]), 8);
-		    memcpy(extension, dirent->deExtension, 3);
-		    
-		    if (name[0] == SLOT_EMPTY)
-				return;
+			char extension[4];
+
+			get_file_name(dirent, name);
+			get_file_extension(dirent, extension);
+
+			if (name[0] == SLOT_EMPTY)
+			return;
 
 		    /* skip over deleted entries */
 		    if (((uint8_t)name[0]) == SLOT_DELETED)
-				continue;
+			continue;
 
-		    /* names are space padded - remove the spaces */
-		    for (i = 8; i > 0; i--) {
-				if (name[i] == ' ') 
-				    name[i] = '\0';
-				else 
-				    break;
-		    }
-
-		    /* remove the spaces from extensions */
-		    for (i = 3; i > 0; i--) {
-				if (extension[i] == ' ') 
-				    extension[i] = '\0';
-				else 
-				    break;
-		    }
+			// printf("%s\n", name);
 
 		    /* don't print "." or ".." directories */
 		    if (strcmp(name, ".")==0) {
@@ -233,16 +263,22 @@ void follow_dir(int cluster_tag[], uint16_t cluster, uint8_t *image_buf, struct 
 		    if ((dirent->deAttributes & ATTR_VOLUME) != 0) { 
 		    } else if ((dirent->deAttributes & ATTR_DIRECTORY) != 0) {
 				file_cluster = getushort(dirent->deStartCluster);
-				follow_dir(cluster_tag, file_cluster, image_buf, bpb);
+				follow_dir(cluster_tag, file_cluster, image_buf, bpb, 0);
 				cluster_tag[file_cluster] = -1; //mark the clusters referenced by directories with -1 'tag'
 		    } else {
 				uint16_t file_start_cluster = getushort(dirent->deStartCluster);
-				uint32_t file_size = getushort(dirent->deFileSize);
-				uint16_t file_end_cluster = file_start_cluster + ((file_size + cluster_info.bytes_per_cluster - 1) / cluster_info.bytes_per_cluster);
+				uint32_t file_size = getulong(dirent->deFileSize);
+				uint32_t file_end_cluster = file_start_cluster - 1 + ((file_size + cluster_info.bytes_per_cluster - 1) / cluster_info.bytes_per_cluster);
+				
 				// printf("start cluster: %i file size: %i no clusters: %i end cluster: %i\n", file_start_cluster, file_size, file_size/cluster_info.bytes_per_cluster, file_end_cluster);
-
-				//call function to mark the cluster as referenced
-				mark_referenced_cluster(cluster_tag, file_start_cluster, file_end_cluster, image_buf, bpb); 
+				if(find_inconsistencies == 0) {
+					//call function to mark the cluster as referenced
+					mark_referenced_cluster(cluster_tag, file_start_cluster, file_end_cluster, image_buf, bpb); 
+				} else {
+					// find_length_inconsistencies(cluster_tag, image_buf, bpb, strcat(strcat(name, "."), extension));
+				}
+				
+				// find_length_inconsistencies(cluster_tag, image_buf, bpb, strcat(strcat(name, "."), extension), file_start_cluster, file_end_cluster);
 		    }
 		    dirent++;
 		}
@@ -284,16 +320,16 @@ int main(int argc, char** argv) {
     	cluster_tag[j] = 0;
     }
 
-    follow_dir(cluster_tag, 0, image_buf, bpb);
+    follow_dir(cluster_tag, 0, image_buf, bpb, 0);
     find_unreferenced_clusters(cluster_tag, image_buf, bpb);
     find_lost_files(cluster_tag, 2, image_buf, bpb);
 
-    find_length_inconsistencies(cluster_tag, image_buf, bpb);
+    // follow_dir(cluster_tag, 0, image_buf, bpb, 1);
 
-    // int i;
-    // for(i = 0; i < cluster_info.number_of_clusters; i++) {
-    // 	printf("cluster %i: %i referenced: %i\n", i, get_fat_entry(i, image_buf, bpb) ,cluster_tag[i]);
-    // }
+    int i;
+    for(i = 0; i < cluster_info.number_of_clusters; i++) {
+    	printf("cluster %i: %i referenced: %i\n", i, get_fat_entry(i, image_buf, bpb) ,cluster_tag[i]);
+    }
 
     free(bpb);
 

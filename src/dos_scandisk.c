@@ -58,14 +58,21 @@ void get_file_name(struct direntry *dirent, char *name) {
     }
 }
 
-// void find_length_inconsistencies(int cluster_tag[], uint8_t *image_buf, struct bpb33* bpb, char *filename) {
-// 	int i;
-// 	for(i = 0; i < cluster_info.number_of_clusters; i++) {
-// 		if(cluster_tag[i] == -3) {
-// 			printf("%s\n", filename);
-// 		}
-// 	}	
-// }
+void find_length_inconsistencies(int cluster_tag[], uint8_t *image_buf, struct bpb33* bpb, uint16_t start_cluster, uint16_t end_cluster, char *filename, uint32_t file_size) {
+
+	// printf("checking: %s\n", filename);
+	// printf("file inc check: start: %i\n", start_cluster);
+	// printf("%s with start: %i and end: %i\n", filename, start_cluster, end_cluster);
+
+	int i;
+	for(i = start_cluster; i <= end_cluster; i++) {
+		// printf("checking cluster: %i wit ref value: %i\n", i, cluster_tag[i]);
+		if(cluster_tag[i] == -3) {
+			printf("%s %i\n", filename, file_size);
+		}
+	}
+
+}
 
 /* write the values into a directory entry */
 void write_dirent(struct direntry *dirent, char *filename, uint16_t start_cluster, uint32_t size)
@@ -81,31 +88,31 @@ void write_dirent(struct direntry *dirent, char *filename, uint16_t start_cluste
     uppername = strdup(filename);
     p2 = uppername;
     for (i = 0; i < strlen(filename); i++) {
-	if (p2[i] == '/' || p2[i] == '\\') {
-	    uppername = p2+i+1;
-	}
+		if (p2[i] == '/' || p2[i] == '\\') {
+		    uppername = p2+i+1;
+		}
     }
 
 	/* convert filename to upper case */ // LEFT COMMENTED OUT - SPEC SAYS NAME FILES IN LOWERCASE
- //    for (i = 0; i < strlen(uppername); i++) {
-	// uppername[i] = toupper(uppername[i]);
- //    }
+  //   for (i = 0; i < strlen(uppername); i++) {
+		// uppername[i] = toupper(uppername[i]);
+  //   }
 
     /* set the file name and extension */
     memset(dirent->deName, ' ', 8);
     p = strchr(uppername, '.');
     memcpy(dirent->deExtension, "___", 3);
     if (p == NULL) {
-	fprintf(stderr, "No filename extension given - defaulting to .___\n");
+		fprintf(stderr, "No filename extension given - defaulting to .___\n");
     } else {
-	*p = '\0';
-	p++;
-	len = strlen(p);
+		*p = '\0';
+		p++;
+		len = strlen(p);
 	if (len > 3) len = 3;
-	memcpy(dirent->deExtension, p, len);
+		memcpy(dirent->deExtension, p, len);
     }
     if (strlen(uppername)>8) {
-	uppername[8]='\0';
+		uppername[8]='\0';
     }
     memcpy(dirent->deName, uppername, strlen(uppername));
     free(p2);
@@ -145,7 +152,6 @@ void create_dirent(struct direntry *dirent, char *filename, uint16_t start_clust
 }
 
 void recover_lost_file(int lost_file_number, uint16_t start_cluster, int cluster_count, uint8_t *image_buf, struct bpb33* bpb) {
-	
 
 	struct direntry *dirent;
 	dirent = (struct direntry*)cluster_to_addr(0, image_buf, bpb);
@@ -225,37 +231,37 @@ void mark_referenced_cluster(int cluster_tag[], uint16_t cluster, uint16_t end_c
 
 //walks through directory tree
 void follow_dir(int cluster_tag[], uint16_t cluster, uint8_t *image_buf, struct bpb33* bpb, int find_inconsistencies) {
+    
     struct direntry *dirent;
     int d;
     dirent = (struct direntry*)cluster_to_addr(cluster, image_buf, bpb);
     while (1) {
-		for (d = 0; d < cluster_info.number_of_clusters; d += sizeof(struct direntry)) {
+		for (d = 0; d < bpb->bpbBytesPerSec * bpb->bpbSecPerClust; d += sizeof(struct direntry)) {
+
 			// printf("%i\n", cluster);
 		    uint16_t file_cluster;
-		    // char name[9];
-		    // char extension[4];
+		    char filename[13];
+		    char extension[4];
 
-		    char name[9];
-			char extension[4];
-
-			get_file_name(dirent, name);
+		    get_file_name(dirent, filename);
 			get_file_extension(dirent, extension);
 
-			if (name[0] == SLOT_EMPTY)
-			return;
+			if (filename[0] == SLOT_EMPTY) {
+				return;
+			}
 
-		    /* skip over deleted entries */
-		    if (((uint8_t)name[0]) == SLOT_DELETED)
-			continue;
+			/* skip over deleted entries */
+		    if (((uint8_t)filename[0]) == SLOT_DELETED) {
+		    	continue;
+		    }
 
-			// printf("%s\n", name);
 
 		    /* don't print "." or ".." directories */
-		    if (strcmp(name, ".")==0) {
+		    if (strcmp(filename, ".")==0) {
 				dirent++;
 				continue;
 		    }
-		    if (strcmp(name, "..")==0) {
+		    if (strcmp(filename, "..")==0) {
 				dirent++;
 				continue;
 		    }
@@ -263,22 +269,26 @@ void follow_dir(int cluster_tag[], uint16_t cluster, uint8_t *image_buf, struct 
 		    if ((dirent->deAttributes & ATTR_VOLUME) != 0) { 
 		    } else if ((dirent->deAttributes & ATTR_DIRECTORY) != 0) {
 				file_cluster = getushort(dirent->deStartCluster);
-				follow_dir(cluster_tag, file_cluster, image_buf, bpb, 0);
-				cluster_tag[file_cluster] = -1; //mark the clusters referenced by directories with -1 'tag'
+				
+				if (find_inconsistencies == 1) {
+					follow_dir(cluster_tag, file_cluster, image_buf, bpb, 1);
+				} else {
+					cluster_tag[file_cluster] = -1; //mark the clusters referenced by directories with -1 'tag'
+					follow_dir(cluster_tag, file_cluster, image_buf, bpb, 0);
+				}
 		    } else {
 				uint16_t file_start_cluster = getushort(dirent->deStartCluster);
 				uint32_t file_size = getulong(dirent->deFileSize);
-				uint32_t file_end_cluster = file_start_cluster - 1 + ((file_size + cluster_info.bytes_per_cluster - 1) / cluster_info.bytes_per_cluster);
-				
+				uint16_t file_end_cluster = file_start_cluster - 1 + ((file_size + cluster_info.bytes_per_cluster - 1) / cluster_info.bytes_per_cluster);
 				// printf("start cluster: %i file size: %i no clusters: %i end cluster: %i\n", file_start_cluster, file_size, file_size/cluster_info.bytes_per_cluster, file_end_cluster);
 				if(find_inconsistencies == 0) {
 					//call function to mark the cluster as referenced
 					mark_referenced_cluster(cluster_tag, file_start_cluster, file_end_cluster, image_buf, bpb); 
-				} else {
-					// find_length_inconsistencies(cluster_tag, image_buf, bpb, strcat(strcat(name, "."), extension));
+					// printf("start cluster: %i file size: %i no clusters: %i end cluster: %i\n", file_start_cluster, file_size, file_size/cluster_info.bytes_per_cluster, file_end_cluster);
+				} else if (find_inconsistencies == 1) {
+					// printf("start cluster: %i file size: %i no clusters: %i end cluster: %i\n", file_start_cluster, file_size, file_size/cluster_info.bytes_per_cluster, file_end_cluster);
+					find_length_inconsistencies(cluster_tag, image_buf, bpb, file_start_cluster, file_end_cluster, strcat(strcat(filename, "."), extension), file_size);
 				}
-				
-				// find_length_inconsistencies(cluster_tag, image_buf, bpb, strcat(strcat(name, "."), extension), file_start_cluster, file_end_cluster);
 		    }
 		    dirent++;
 		}
@@ -324,12 +334,12 @@ int main(int argc, char** argv) {
     find_unreferenced_clusters(cluster_tag, image_buf, bpb);
     find_lost_files(cluster_tag, 2, image_buf, bpb);
 
-    // follow_dir(cluster_tag, 0, image_buf, bpb, 1);
+    follow_dir(cluster_tag, 0, image_buf, bpb, 1);
 
-    int i;
-    for(i = 0; i < cluster_info.number_of_clusters; i++) {
-    	printf("cluster %i: %i referenced: %i\n", i, get_fat_entry(i, image_buf, bpb) ,cluster_tag[i]);
-    }
+    // int i;
+    // for(i = 0; i < cluster_info.number_of_clusters; i++) {
+    // 	printf("cluster %i: %i referenced: %i\n", i, get_fat_entry(i, image_buf, bpb) ,cluster_tag[i]);
+    // }
 
     free(bpb);
 

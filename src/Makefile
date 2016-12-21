@@ -8,3 +8,6 @@ dos_cp:	dos_cp.o dos.o
 
 dos_scandisk:	dos_scandisk.o dos.o
 	$(CC) $(CFLAGS) -o dos_scandisk dos_scandisk.o dos.o
+
+clean:
+	rm -f *.o

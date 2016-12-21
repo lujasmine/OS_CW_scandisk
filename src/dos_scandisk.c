@@ -152,8 +152,6 @@ void write_dirent(struct direntry *dirent, char *filename, uint16_t start_cluste
     putushort(dirent->deStartCluster, start_cluster);
     putulong(dirent->deFileSize, size);
 
-    /* a real filesystem would set the time and date here, but it's
-       not necessary for this coursework */
 }
 
 //create_dirent finds a free slot in the directory, and write the directory entry - from dos_cp file
